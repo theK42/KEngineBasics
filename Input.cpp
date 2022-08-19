@@ -36,7 +36,7 @@ void Input::RegisterLibrary(lua_State * luaState, const char * name)
 			luaL_checktype(luaState, 2, LUA_TFUNCTION);
 
 			CombinedAxisBinding* binding = new (lua_newuserdata(luaState, sizeof(CombinedAxisBinding))) CombinedAxisBinding;
-			luaL_getmetatable(luaState, "CombinedAxisBinding");
+			luaL_getmetatable(luaState, "KEngineBasics.CombinedAxisBinding");
 			lua_setmetatable(luaState, -2);
 			float deadZone = 0.1;
 			float frequency = 30;
@@ -46,8 +46,26 @@ void Input::RegisterLibrary(lua_State * luaState, const char * name)
 			return 1;
 		};
 
+		auto setOnButtonDown = [](lua_State* luaState) {
+			Input* inputSystem = (Input*)lua_touserdata(luaState, lua_upvalueindex(1));
+			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
+			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
+
+			luaL_checktype(luaState, 2, LUA_TFUNCTION);
+
+			ButtonDownBinding * binding = new (lua_newuserdata(luaState, sizeof(ButtonDownBinding))) ButtonDownBinding;
+			luaL_getmetatable(luaState, "KEngineBasics.ButtonDownBinding");
+			lua_setmetatable(luaState, -2);
+
+			KEngineCore::ScheduledLuaCallback<> callback = scheduler->CreateCallback<>(luaState, 2);
+			binding->Init(inputSystem, buttonName, callback.mCallback, callback.mCancelCallback);
+			return 1;
+		};
+
+
 		const struct luaL_Reg inputLibrary[] = {
 			{"setOnCombinedAxisTilt", setOnCombinedAxisTilt},
+			{"setOnButtonDown", setOnButtonDown},
 			{nullptr, nullptr}
 		};
 
@@ -56,11 +74,24 @@ void Input::RegisterLibrary(lua_State * luaState, const char * name)
 			binding->~CombinedAxisBinding();
 			return 0;
 		};
+		auto deleteButtonDownBinding = [](lua_State* luaState) {
+			ButtonDownBinding* binding = (ButtonDownBinding*)luaL_checkudata(luaState, 1, "KEngineBasics.ButtonDownBinding");
+			binding->~ButtonDownBinding();
+			return 0;
+		};
 
 		lua_checkstack(luaState, 3);
 		luaL_newmetatable(luaState, "KEngineBasics.CombinedAxisBinding");
 		lua_pushstring(luaState, "__gc");
 		lua_pushcfunction(luaState, deleteCombinedAxisBinding);
+		lua_settable(luaState, -3);
+		lua_pop(luaState, 1);
+
+
+		lua_checkstack(luaState, 3);
+		luaL_newmetatable(luaState, "KEngineBasics.ButtonDownBinding");
+		lua_pushstring(luaState, "__gc");
+		lua_pushcfunction(luaState, deleteButtonDownBinding);
 		lua_settable(luaState, -3);
 		lua_pop(luaState, 1);
 
@@ -78,6 +109,7 @@ void Input::Deinit()
 {
 	for (auto binding : mCombinedAxisBindings.mBindings)
 	{
+		mCombinedAxisBindings.mProcessingBinding = binding;
 		binding->Deinit();
 	}
 	mCombinedAxisBindings.mBindings.clear();
@@ -87,8 +119,10 @@ void Input::Deinit()
 		auto& bindingGroup = bindingGroupPair.second;
 		for (auto binding : bindingGroup.mBindings)
 		{
+			bindingGroup.mProcessingBinding = binding;
 			binding->Deinit();
 		}
+		bindingGroup.mProcessingBinding = nullptr;
 	}
 	mAxisBindings.clear();
 
@@ -97,16 +131,22 @@ void Input::Deinit()
 		auto& bindingPack = bindingPackPair.second;
 		for (auto binding : bindingPack.mButtonHoldBindings.mBindings)
 		{
+			bindingPack.mButtonHoldBindings.mProcessingBinding = binding;
 			binding->Deinit();
 		}
+		bindingPack.mButtonHoldBindings.mProcessingBinding = nullptr;
 		for (auto binding : bindingPack.mButtonUpBindings.mBindings)
 		{
+			bindingPack.mButtonUpBindings.mProcessingBinding = binding;
 			binding->Deinit();
 		}
+		bindingPack.mButtonUpBindings.mProcessingBinding = nullptr;
 		for (auto binding : bindingPack.mButtonDownBindings.mBindings)
 		{
+			bindingPack.mButtonDownBindings.mProcessingBinding = binding;
 			binding->Deinit();
 		}
+		bindingPack.mButtonDownBindings.mProcessingBinding = nullptr;
 	}
 	mButtonBindings.clear();
 
@@ -195,7 +235,14 @@ bool Input::RemoveCombinedAxisBinding(CombinedAxisBinding* binding)
 {
 	if (mCombinedAxisBindings.mBindings.end() != binding->GetPosition())
 	{
-		mCombinedAxisBindings.mBindings.erase(binding->GetPosition());
+		if (mCombinedAxisBindings.mProcessingBinding == binding)
+		{
+			mCombinedAxisBindings.mSelfClearedBindings.push_back(binding);
+		}
+		else
+		{
+			mCombinedAxisBindings.mBindings.erase(binding->GetPosition());
+		}
 		return true;
 	}
 	return false;
@@ -207,7 +254,14 @@ bool Input::RemoveAxisBinding(AxisBinding* binding)
 	auto& bindingGroup = GetAxisBindings(binding->GetAxisName());
 	if (bindingGroup.mBindings.end() != binding->GetPosition())
 	{
-		bindingGroup.mBindings.erase(binding->GetPosition());
+		if (bindingGroup.mProcessingBinding == binding)
+		{
+			bindingGroup.mSelfClearedBindings.push_back(binding);
+		}
+		else
+		{
+			bindingGroup.mBindings.erase(binding->GetPosition());
+		}
 		return true;
 	}
 	return false;
@@ -215,11 +269,18 @@ bool Input::RemoveAxisBinding(AxisBinding* binding)
 
 bool Input::RemoveButtonDownBinding(ButtonDownBinding* binding)
 {
-	assert(HasAxis(binding->GetButtonName()));
+	assert(HasButton(binding->GetButtonName()));
 	auto& bindingGroup = GetButtonBindings(binding->GetButtonName()).mButtonDownBindings;
 	if (bindingGroup.mBindings.end() != binding->GetPosition())
 	{
-		bindingGroup.mBindings.erase(binding->GetPosition());
+		if (bindingGroup.mProcessingBinding == binding)
+		{
+			bindingGroup.mSelfClearedBindings.push_back(binding);
+		}
+		else
+		{
+			bindingGroup.mBindings.erase(binding->GetPosition());
+		}
 		return true;
 	}
 	return false;
@@ -227,11 +288,18 @@ bool Input::RemoveButtonDownBinding(ButtonDownBinding* binding)
 
 bool Input::RemoveButtonHoldBinding(ButtonHoldBinding* binding)
 {
-	assert(HasAxis(binding->GetButtonName()));
+	assert(HasButton(binding->GetButtonName()));
 	auto& bindingGroup = GetButtonBindings(binding->GetButtonName()).mButtonHoldBindings;
 	if (bindingGroup.mBindings.end() != binding->GetPosition())
 	{
-		bindingGroup.mBindings.erase(binding->GetPosition());
+		if (bindingGroup.mProcessingBinding == binding)
+		{
+			bindingGroup.mSelfClearedBindings.push_back(binding);
+		}
+		else
+		{
+			bindingGroup.mBindings.erase(binding->GetPosition());
+		}
 		return true;
 	}
 	return false;
@@ -239,11 +307,18 @@ bool Input::RemoveButtonHoldBinding(ButtonHoldBinding* binding)
 
 bool Input::RemoveButtonUpBinding(ButtonUpBinding* binding)
 {
-	assert(HasAxis(binding->GetButtonName()));
+	assert(HasButton(binding->GetButtonName()));
 	auto& bindingGroup = GetButtonBindings(binding->GetButtonName()).mButtonUpBindings;
 	if (bindingGroup.mBindings.end() != binding->GetPosition())
 	{
-		bindingGroup.mBindings.erase(binding->GetPosition());
+		if (bindingGroup.mProcessingBinding == binding)
+		{
+			bindingGroup.mSelfClearedBindings.push_back(binding);
+		}
+		else
+		{
+			bindingGroup.mBindings.erase(binding->GetPosition());
+		}
 		return true;
 	}
 	return false;
@@ -656,6 +731,7 @@ void CombinedAxisBinding::Cancel()
 			mCancelCallback();
 		}
 	}
+	mInputSystem = nullptr;
 }
 
 void KEngineBasics::Input::HandleAxisChange(ControllerType type, int axisId, float axisPosition)
@@ -669,6 +745,7 @@ void KEngineBasics::Input::HandleAxisChange(ControllerType type, int axisId, flo
 			bindingGroup.mProcessingBinding = binding;
 			binding->UpdateAxis(axisPosition);
 		}
+		bindingGroup.mProcessingBinding = nullptr;
 		bindingGroup.Cleanup();
 	}
 }
@@ -684,6 +761,7 @@ void KEngineBasics::Input::HandleButtonDown(ControllerType type, int buttonId)
 			bindingGroup.mProcessingBinding = binding;
 			binding->Fire();
 		}
+		bindingGroup.mProcessingBinding = nullptr;
 		bindingGroup.Cleanup();
 	}
 }
@@ -700,6 +778,7 @@ void KEngineBasics::Input::HandleButtonUp(ControllerType type, int buttonId)
 			bindingGroup.mProcessingBinding = binding;
 			binding->Fire();
 		}
+		bindingGroup.mProcessingBinding = nullptr;
 		bindingGroup.Cleanup();
 	}
 }
