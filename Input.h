@@ -54,6 +54,7 @@ namespace KEngineBasics {
 
 		void Fire();
 		void Cancel();
+		static const char MetaName[];
 	private:
 		Input*					mInputSystem{ nullptr };
 		KEngineCore::StringHash mButtonName;
@@ -78,6 +79,7 @@ namespace KEngineBasics {
 
 		void Fire();
 		void Cancel();
+		static const char MetaName[];
 	private:
 		Input*					mInputSystem{ nullptr };
 		KEngineCore::StringHash	mButtonName;
@@ -104,6 +106,7 @@ namespace KEngineBasics {
 		void ButtonUp();
 
 		void Cancel();
+		static const char MetaName[];
 	private:
 
 		void Fire();
@@ -112,10 +115,14 @@ namespace KEngineBasics {
 		KEngineCore::Timer*		mTimer{ nullptr };
 		KEngineCore::StringHash	mButtonName;
 		Position				mPosition;
-		float					mFrequency;
+		float					mFrequency{ 0.0f };
 		KEngineCore::Timeout	mTimeout;
-		std::function<void()>	mCallback;
-		std::function<void()>	mCancelCallback;
+		std::function<void()>	mCallback{ nullptr };
+		std::function<void()>	mCancelCallback{ nullptr };
+		bool					mButtonIsDown{ false };
+		bool					mButtonIsReady{ true };
+		ButtonDownBinding		mButtonDown;
+		ButtonUpBinding			mButtonUp;
 	};
 
 	class AxisBinding
@@ -137,6 +144,7 @@ namespace KEngineBasics {
 		void Fire(float tilt);
 		void Cancel();
 
+		static const char MetaName[];
 	private:
 		Input*						mInputSystem{ nullptr };
 		KEngineCore::Timer*			mTimer{ nullptr };
@@ -175,6 +183,8 @@ namespace KEngineBasics {
 
 		void Fire(const KEngine2D::Point & tilt);
 		void Cancel();
+		static const char MetaName[];
+
 	private:
 
 
