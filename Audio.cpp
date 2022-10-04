@@ -12,9 +12,14 @@ KEngineBasics::AudioSystem::~AudioSystem()
 
 void KEngineBasics::AudioSystem::Init(KEngineCore::LuaScheduler* luaScheduler)
 {
-	Mix_Init(MIX_INIT_MP3); 
-	int status = Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048);
-	assert(status == 0);
+	int status = Mix_Init(MIX_INIT_MP3);
+    if ((status & MIX_INIT_MP3) == 0)
+    {
+        fprintf(stderr, "Failed to get MP3 support\n");
+        fprintf(stderr, "Mix_Init error: %s\n", Mix_GetError());
+    }
+    status = Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, MIX_DEFAULT_CHANNELS, 2048);
+    assert(status == 0);
 	mLuaScheduler = luaScheduler;
 	RegisterLibrary(luaScheduler->GetMainState());
 }
@@ -78,8 +83,13 @@ void KEngineBasics::AudioSystem::RegisterLibrary(lua_State* luaState, char const
 void KEngineBasics::AudioSystem::LoadMusic(KEngineCore::StringHash musicId, const std::string& filename)
 {
 	Mix_Music* m = Mix_LoadMUS(filename.c_str());
-	assert(m);
-	mLoadedMusic[musicId] = m;
+    if (!m)
+    {
+        fprintf(stderr, "Music file failed to load: %s\n", filename.c_str());
+        fprintf(stderr, "Mix_LoadMUS error: %s\n", Mix_GetError());
+    } else {
+        mLoadedMusic[musicId] = m;
+    }
 }
 
 void KEngineBasics::AudioSystem::UnloadMusic(KEngineCore::StringHash musicId)
@@ -130,6 +140,10 @@ KEngineBasics::Sound* KEngineBasics::AudioSystem::PlaySound(KEngineCore::StringH
 	{
 		Mix_Chunk* s = it->second;
 		int channel = Mix_PlayChannel(-1, s, 0);
+        if (channel == -1)
+        {
+            fprintf(stderr, "Mix_PlayChannel error: %s\n", Mix_GetError());
+        }
 	}
 	return nullptr;
 }
