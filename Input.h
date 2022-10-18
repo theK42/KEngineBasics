@@ -264,7 +264,9 @@ namespace KEngineBasics {
 				for (auto selfClearedBinding : mSelfClearedBindings)
 				{
 					mBindings.erase(selfClearedBinding->GetPosition());
+					selfClearedBinding->SetPosition(mBindings.end());
 				}
+				mSelfClearedBindings.clear();
 			}
 		};
 
