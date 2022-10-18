@@ -52,6 +52,24 @@ void Input::RegisterLibrary(lua_State * luaState, const char * name)
 			return 1;
 		};
 
+		auto waitForButtonDown = [](lua_State * luaState) {
+			Input* inputSystem = (Input*)lua_touserdata(luaState, lua_upvalueindex(1));
+			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
+			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
+
+			ButtonDownBinding* binding = new (lua_newuserdata(luaState, sizeof(ButtonDownBinding))) ButtonDownBinding;
+			luaL_getmetatable(luaState, "KEngineBasics.ButtonDownBinding");
+			lua_setmetatable(luaState, -2);
+
+			KEngineCore::ScheduledLuaThread* scheduledThread = scheduler->GetScheduledThread(luaState);
+			scheduledThread->Pause();
+			
+			binding->Init(inputSystem, buttonName, [scheduledThread]() {
+				scheduledThread->Resume();
+			}, nullptr, true);
+			return lua_yield(luaState, 1);  //see Timer "waits" function
+		};
+
 		auto setOnButtonDown = [](lua_State* luaState) {
 			Input* inputSystem = (Input*)lua_touserdata(luaState, lua_upvalueindex(1));
 			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
@@ -105,6 +123,7 @@ void Input::RegisterLibrary(lua_State * luaState, const char * name)
 
 		const luaL_Reg inputLibrary[] = {
 			{"setOnCombinedAxisTilt", setOnCombinedAxisTilt},
+			{"waitForButtonDown", waitForButtonDown},
 			{"setOnButtonDown", setOnButtonDown},
 			{"setOnButtonHold", setOnButtonHold},
 			{"setOnButtonUp", setOnButtonUp},
@@ -355,13 +374,14 @@ ButtonDownBinding::~ButtonDownBinding()
 	Deinit();
 }
 
-void ButtonDownBinding::Init(Input* inputSystem, KEngineCore::StringHash buttonName, std::function<void()> callback, std::function<void()> cancelCallback)
+void ButtonDownBinding::Init(Input* inputSystem, KEngineCore::StringHash buttonName, std::function<void()> callback, std::function<void()> cancelCallback, bool oneShot)
 {
 	assert(mInputSystem == nullptr);
 	mInputSystem = inputSystem;
 	mButtonName = buttonName;
 	mCallback = callback;
 	mCancelCallback = cancelCallback;
+	mOneShot = oneShot;
 	inputSystem->AddButtonDownBinding(this);
 }
 
@@ -390,6 +410,10 @@ void ButtonDownBinding::Fire()
 {
 	assert(mCallback);
 	mCallback();
+	if (mOneShot)
+	{
+		mInputSystem->RemoveButtonDownBinding(this);
+	}
 }
 
 void ButtonDownBinding::Cancel()

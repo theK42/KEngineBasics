@@ -43,7 +43,7 @@ namespace KEngineBasics {
 	public:
 		ButtonDownBinding();
 		~ButtonDownBinding();
-		void Init(Input* inputSystem, KEngineCore::StringHash buttonName, std::function<void()> callback, std::function<void()> cancelCallback = nullptr);
+		void Init(Input* inputSystem, KEngineCore::StringHash buttonName, std::function<void()> callback, std::function<void()> cancelCallback = nullptr, bool oneShot = false);
 		void Deinit();
 
 		typedef std::list<ButtonDownBinding*>::iterator Position;
@@ -61,6 +61,7 @@ namespace KEngineBasics {
 		Position				mPosition;
 		std::function<void()>	mCallback;
 		std::function<void()>	mCancelCallback;
+		bool					mOneShot;
 	};
 
 	class ButtonUpBinding
