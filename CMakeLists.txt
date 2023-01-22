@@ -8,6 +8,14 @@ Input.h
 Input.cpp
 Audio.h
 Audio.cpp
+UIView.h
+UIView.cpp
+UITextView.h
+UITextView.cpp
+Renderers.h
+Renderers.cpp
+UIViewFactory.h
+UIViewFactory.cpp
 )
 
 function(add_submodule submodule)
@@ -33,7 +41,12 @@ endfunction()
 target_compile_features(KEngineBasics PRIVATE cxx_std_17) 
 target_link_libraries(KEngineBasics PUBLIC KEngineCore KEngine2D)
 
+option(KENGINE_BASICS_USE_OPENGL "Whether to include support for OpenGL" ON)
 
+if (KENGINE_BASICS_USE_OPENGL)
+    target_compile_definitions(KEngineBasics PUBLIC KENGINE_USE_OPENGL)
+	target_link_libraries(KEngineBasics PUBLIC KEngineOpenGL)
+endif()
 
 if( ${CMAKE_SYSTEM_NAME} MATCHES "Emscripten")
     set(USE_FLAGS "-s USE_SDL=2 -s USE_SDL_MIXER=2")
