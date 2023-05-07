@@ -27,122 +27,6 @@ void Input::Init(KEngineCore::LuaScheduler* scheduler, KEngineCore::Timer* timer
 	assert(mScheduler == nullptr);
 	mScheduler = scheduler;
 	mTimer = timer;
-	RegisterLibrary(scheduler->GetMainState());
-}
-
-
-void Input::RegisterLibrary(lua_State * luaState, const char * name)
-{
-	auto luaopen_input = [](lua_State* luaState) {
-		auto setOnCombinedAxisTilt = [](lua_State* luaState) {
-			Input* inputSystem = (Input*)lua_touserdata(luaState, lua_upvalueindex(1));
-			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
-			KEngineCore::StringHash axisName(luaL_checkstring(luaState, 1));
-
-			luaL_checktype(luaState, 2, LUA_TFUNCTION);
-
-			CombinedAxisBinding* binding = new (lua_newuserdata(luaState, sizeof(CombinedAxisBinding))) CombinedAxisBinding;
-			luaL_getmetatable(luaState, "KEngineBasics.CombinedAxisBinding");
-			lua_setmetatable(luaState, -2);
-			float deadZone = 0.1;
-			float frequency = 30;
-
-			KEngineCore::ScheduledLuaCallback<KEngine2D::Point> callback = scheduler->CreateCallback<KEngine2D::Point>(luaState, 2);
-			binding->Init(inputSystem, inputSystem->mTimer, axisName, deadZone, frequency, callback.mCallback, callback.mCancelCallback);
-			return 1;
-		};
-
-		auto waitForButtonDown = [](lua_State * luaState) {
-			Input* inputSystem = (Input*)lua_touserdata(luaState, lua_upvalueindex(1));
-			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
-			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
-
-			ButtonDownBinding* binding = new (lua_newuserdata(luaState, sizeof(ButtonDownBinding))) ButtonDownBinding;
-			luaL_getmetatable(luaState, "KEngineBasics.ButtonDownBinding");
-			lua_setmetatable(luaState, -2);
-
-			KEngineCore::ScheduledLuaThread* scheduledThread = scheduler->GetScheduledThread(luaState);
-			scheduledThread->Pause();
-			
-			binding->Init(inputSystem, buttonName, [scheduledThread]() {
-				scheduledThread->Resume();
-			}, nullptr, true);
-			return lua_yield(luaState, 1);  //see Timer "waits" function
-		};
-
-		auto setOnButtonDown = [](lua_State* luaState) {
-			Input* inputSystem = (Input*)lua_touserdata(luaState, lua_upvalueindex(1));
-			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
-			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
-
-			luaL_checktype(luaState, 2, LUA_TFUNCTION);
-
-			ButtonDownBinding * binding = new (lua_newuserdata(luaState, sizeof(ButtonDownBinding))) ButtonDownBinding;
-			luaL_getmetatable(luaState, "KEngineBasics.ButtonDownBinding");
-			lua_setmetatable(luaState, -2);
-
-			KEngineCore::ScheduledLuaCallback<> callback = scheduler->CreateCallback<>(luaState, 2);
-			binding->Init(inputSystem, buttonName, callback.mCallback, callback.mCancelCallback);
-			return 1;
-		};
-
-		auto setOnButtonHold = [](lua_State* luaState) {
-			Input* inputSystem = (Input*)lua_touserdata(luaState, lua_upvalueindex(1));
-			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
-			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
-
-			float frequency = luaL_checknumber(luaState, 2);
-
-			luaL_checktype(luaState, 3, LUA_TFUNCTION);
-
-			ButtonHoldBinding* binding = new (lua_newuserdata(luaState, sizeof(ButtonHoldBinding))) ButtonHoldBinding;
-			luaL_getmetatable(luaState, "KEngineBasics.ButtonHoldBinding");
-			lua_setmetatable(luaState, -2);
-
-			KEngineCore::ScheduledLuaCallback<> callback = scheduler->CreateCallback<>(luaState, 3);
-			binding->Init(inputSystem, inputSystem->mTimer, buttonName, frequency, callback.mCallback, callback.mCancelCallback);
-			return 1;
-		};
-
-		auto setOnButtonUp = [](lua_State* luaState) {
-			Input* inputSystem = (Input*)lua_touserdata(luaState, lua_upvalueindex(1));
-			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
-			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
-
-			luaL_checktype(luaState, 2, LUA_TFUNCTION);
-
-			ButtonUpBinding* binding = new (lua_newuserdata(luaState, sizeof(ButtonUpBinding))) ButtonUpBinding;
-			luaL_getmetatable(luaState, "KEngineBasics.ButtonUpBinding");
-			lua_setmetatable(luaState, -2);
-
-			KEngineCore::ScheduledLuaCallback<> callback = scheduler->CreateCallback<>(luaState, 2);
-			binding->Init(inputSystem, buttonName, callback.mCallback, callback.mCancelCallback);
-			return 1;
-		};
-
-
-		const luaL_Reg inputLibrary[] = {
-			{"setOnCombinedAxisTilt", setOnCombinedAxisTilt},
-			{"waitForButtonDown", waitForButtonDown},
-			{"setOnButtonDown", setOnButtonDown},
-			{"setOnButtonHold", setOnButtonHold},
-			{"setOnButtonUp", setOnButtonUp},
-			{nullptr, nullptr}
-		};
-
-		CreateGCMetaTableForClass<CombinedAxisBinding, CombinedAxisBinding::MetaName>(luaState);
-		CreateGCMetaTableForClass<ButtonDownBinding, ButtonDownBinding::MetaName>(luaState);
-		CreateGCMetaTableForClass<ButtonHoldBinding, ButtonHoldBinding::MetaName>(luaState);
-		CreateGCMetaTableForClass<ButtonUpBinding, ButtonUpBinding::MetaName>(luaState);
-
-		luaL_newlibtable(luaState, inputLibrary);
-		lua_pushvalue(luaState, lua_upvalueindex(1));
-		luaL_setfuncs(luaState, inputLibrary, 1);
-		return 1;
-	};
-
-
-	PreloadLibrary(luaState, name, luaopen_input);
 }
 
 void Input::Deinit()
@@ -188,6 +72,13 @@ void Input::Deinit()
 		}
 		bindingPack.mButtonDownBindings.mProcessingBinding = nullptr;
 	}
+
+	for (auto forwarder : mForwarders)
+	{
+		forwarder->Deinit(true);
+	}
+	mForwarders.clear();
+
 	mButtonBindings.clear();
 
 	mButtonMappings.clear();
@@ -388,7 +279,6 @@ void ButtonDownBinding::Init(Input* inputSystem, KEngineCore::StringHash buttonN
 void ButtonDownBinding::Deinit()
 {
 	Cancel();
-	mInputSystem = nullptr;
 }
 
 void ButtonDownBinding::SetPosition(ButtonDownBinding::Position position)
@@ -413,6 +303,7 @@ void ButtonDownBinding::Fire()
 	if (mOneShot)
 	{
 		mInputSystem->RemoveButtonDownBinding(this);
+		this->mInputSystem = nullptr;
 	}
 }
 
@@ -423,6 +314,7 @@ void ButtonDownBinding::Cancel()
 		if (mInputSystem->RemoveButtonDownBinding(this) && mCancelCallback) {
 			mCancelCallback();
 		}
+		mInputSystem = nullptr;
 	}
 }
 
@@ -478,6 +370,7 @@ void ButtonUpBinding::Cancel()
 		if (mInputSystem->RemoveButtonUpBinding(this) && mCancelCallback) {
 			mCancelCallback();
 		}
+		mInputSystem = nullptr;
 	}
 }
 
@@ -574,6 +467,7 @@ void ButtonHoldBinding::Cancel()
 		if (mInputSystem->RemoveButtonHoldBinding(this) && mCancelCallback) {
 			mCancelCallback();
 		}
+		mInputSystem = nullptr;
 	}
 }
 
@@ -690,6 +584,7 @@ void AxisBinding::Cancel()
 		if (mInputSystem->RemoveAxisBinding(this) && mCancelCallback) {
 			mCancelCallback();
 		}
+		mInputSystem = nullptr;
 	}
 }
 
@@ -808,21 +703,57 @@ void CombinedAxisBinding::Cancel()
 
 void KEngineBasics::Input::HandleAxisChange(ControllerType type, int axisId, float axisPosition)
 {
-	if (HasAxisMapping(type, axisId))
+	if (mPaused)
 	{
-		KEngineCore::StringHash axisName = GetAxisMapping(type, axisId);
-		auto& bindingGroup = GetAxisBindings(axisName);
-		for (AxisBinding* binding : bindingGroup.mBindings)
+		mQueuedAxisUpdates[{type, axisId}] = axisPosition;
+	}
+	else
+	{
+		if (HasAxisMapping(type, axisId))
 		{
-			bindingGroup.mProcessingBinding = binding;
-			binding->UpdateAxis(axisPosition);
+			KEngineCore::StringHash axisName = GetAxisMapping(type, axisId);
+			auto& bindingGroup = GetAxisBindings(axisName);
+			for (AxisBinding* binding : bindingGroup.mBindings)
+			{
+				bindingGroup.mProcessingBinding = binding;
+				binding->UpdateAxis(axisPosition);
+			}
+			bindingGroup.mProcessingBinding = nullptr;
+			bindingGroup.Cleanup();
 		}
-		bindingGroup.mProcessingBinding = nullptr;
-		bindingGroup.Cleanup();
+
+		for (auto forwarder : mForwarders)
+		{
+			forwarder->HandleAxisChange(type, axisId, axisPosition);
+		}
 	}
 }
 
 void KEngineBasics::Input::HandleButtonDown(ControllerType type, int buttonId)
+{
+	if (mPaused)
+	{
+		if (mQueuedButtonUps.contains({ type, buttonId }))
+		{
+			mQueuedButtonUps.erase({ type, buttonId });
+		}
+		else
+		{
+			mQueuedButtonDowns.insert({ type, buttonId });
+		}
+	}
+	else {
+		HandleButonDownInternal(type, buttonId);
+		HandleButonDownInternal(type, -1);
+
+		for (auto forwarder : mForwarders)
+		{
+			forwarder->HandleButtonDown(type, buttonId);
+		}
+	}
+}
+
+void KEngineBasics::Input::HandleButonDownInternal(KEngineBasics::ControllerType type, int buttonId)
 {
 	if (HasButtonMapping(type, buttonId))
 	{
@@ -840,6 +771,29 @@ void KEngineBasics::Input::HandleButtonDown(ControllerType type, int buttonId)
 
 
 void KEngineBasics::Input::HandleButtonUp(ControllerType type, int buttonId)
+{
+	if (mPaused)
+	{
+		if (mQueuedButtonDowns.contains({ type, buttonId }))
+		{
+			mQueuedButtonDowns.erase({ type, buttonId });
+		}
+		else
+		{
+			mQueuedButtonUps.insert({ type, buttonId });
+		}
+	}
+	else {
+		HandleButtonUpInternal(type, buttonId);
+		HandleButtonUpInternal(type, -1);
+		for (auto forwarder : mForwarders)
+		{
+			forwarder->HandleButtonUp(type, buttonId);
+		}
+	}
+}
+
+void KEngineBasics::Input::HandleButtonUpInternal(KEngineBasics::ControllerType type, int buttonId)
 {
 	if (HasButtonMapping(type, buttonId))
 	{
@@ -891,6 +845,42 @@ KEngineCore::StringHash KEngineBasics::Input::GetButtonForAxis(KEngineCore::Stri
 	return mAxisButtons.find({ axisName, direction })->second;
 }
 
+void KEngineBasics::Input::AddInputForwarder(InputForwarder* forwarder)
+{
+	mForwarders.push_back(forwarder);
+	forwarder->mPosition = std::next(mForwarders.rbegin()).base();
+}
+
+void KEngineBasics::Input::RemoveInputForwarder(InputForwarder* forwarder)
+{
+	mForwarders.erase(forwarder->mPosition);
+	forwarder->mPosition = mForwarders.end();
+}
+
+void KEngineBasics::Input::Pause()
+{
+	mPaused = true;
+}
+
+void KEngineBasics::Input::Resume()
+{
+	mPaused = false;
+	for (auto pair : mQueuedAxisUpdates)
+	{
+		HandleAxisChange(pair.first.type, pair.first.id, pair.second);
+	}
+	mQueuedAxisUpdates.clear();
+	for (auto entry : mQueuedButtonDowns)
+	{
+		HandleButtonDown(entry.type, entry.id);
+	}
+	mQueuedButtonDowns.clear();
+	for (auto entry : mQueuedButtonUps)
+	{
+		HandleButtonUp(entry.type, entry.id);
+	}
+	mQueuedButtonUps.clear();
+}
 
 bool KEngineBasics::Input::HasAxisMapping(ControllerType type, int axisId) const
 {
@@ -920,4 +910,188 @@ KEngineBasics::Input::BindingGroup<AxisBinding>& KEngineBasics::Input::GetAxisBi
 KEngineBasics::Input::ButtonBindingPack& KEngineBasics::Input::GetButtonBindings(KEngineCore::StringHash name)
 {
 	return mButtonBindings.find(name)->second;
+}
+
+KEngineBasics::InputForwarder::InputForwarder()
+{
+}
+
+KEngineBasics::InputForwarder::~InputForwarder()
+{
+	Deinit();
+}
+
+void KEngineBasics::InputForwarder::Init(Input* input, std::function<void(ControllerType, int, int)> axisCallback, std::function<void(ControllerType, int)> buttonDownCallback, std::function<void(ControllerType, int)> buttonUpCallback)
+{
+	assert(mInput == nullptr);
+	mAxisCallback = axisCallback;
+	mButtonDownCallback = buttonDownCallback;
+	mButtonUpCallback = buttonUpCallback;
+	mInput = input;
+	input->AddInputForwarder(this);
+}
+
+void KEngineBasics::InputForwarder::Deinit(bool batched)
+{
+	if (mInput && !batched)
+	{
+		mInput->RemoveInputForwarder(this);	
+	}
+	mInput = nullptr;
+	mAxisCallback = nullptr;
+	mButtonDownCallback = nullptr;
+	mButtonUpCallback = nullptr;
+}
+
+void KEngineBasics::InputForwarder::HandleAxisChange(ControllerType type, int axisId, float axisPosition)
+{
+	mAxisCallback(type, axisId, axisPosition);
+}
+
+void KEngineBasics::InputForwarder::HandleButtonDown(ControllerType type, int buttonId)
+{
+	mButtonDownCallback(type, buttonId);
+}
+
+void KEngineBasics::InputForwarder::HandleButtonUp(ControllerType type, int buttonId)
+{
+	mButtonUpCallback(type, buttonId);
+}
+
+KEngineBasics::InputLibrary::InputLibrary()
+{
+}
+
+KEngineBasics::InputLibrary::~InputLibrary()
+{
+	Deinit();
+}
+
+void KEngineBasics::InputLibrary::Init(lua_State* luaState)
+{
+	auto luaopen_input = [](lua_State* luaState) {
+		auto setOnCombinedAxisTilt = [](lua_State* luaState) {
+			KEngineBasics::InputLibrary* inputLib = (KEngineBasics::InputLibrary*)lua_touserdata(luaState, lua_upvalueindex(1));
+			KEngineBasics::Input* inputSystem = inputLib->GetContextualObject(luaState, 3);
+			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
+			KEngineCore::StringHash axisName(luaL_checkstring(luaState, 1));
+
+			luaL_checktype(luaState, 2, LUA_TFUNCTION);
+
+			CombinedAxisBinding* binding = new (lua_newuserdata(luaState, sizeof(CombinedAxisBinding))) CombinedAxisBinding;
+			luaL_getmetatable(luaState, "KEngineBasics.CombinedAxisBinding");
+			lua_setmetatable(luaState, -2);
+			float deadZone = 0.1;
+			float frequency = 30;
+
+			KEngineCore::ScheduledLuaCallback<KEngine2D::Point> callback = scheduler->CreateCallback<KEngine2D::Point>(luaState, 2);
+			binding->Init(inputSystem, inputSystem->mTimer, axisName, deadZone, frequency, callback.mCallback, callback.mCancelCallback);
+			return 1;
+		};
+
+		auto waitForButtonDown = [](lua_State* luaState) {
+			KEngineBasics::InputLibrary* inputLib = (KEngineBasics::InputLibrary*)lua_touserdata(luaState, lua_upvalueindex(1));
+			KEngineBasics::Input* inputSystem = inputLib->GetContextualObject(luaState, 2);
+			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
+			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
+
+			ButtonDownBinding* binding = new (lua_newuserdata(luaState, sizeof(ButtonDownBinding))) ButtonDownBinding;
+			luaL_getmetatable(luaState, "KEngineBasics.ButtonDownBinding");
+			lua_setmetatable(luaState, -2);
+
+			KEngineCore::ScheduledLuaThread* scheduledThread = scheduler->GetScheduledThread(luaState);
+			scheduledThread->Pause();
+
+			binding->Init(inputSystem, buttonName, [scheduledThread]() {
+				scheduledThread->ClearCleanupCallback();
+				scheduledThread->Resume();
+			}, nullptr, true);
+
+			scheduledThread->SetCleanupCallback([binding]() {
+				binding->Deinit();
+			});
+
+			return lua_yield(luaState, 1);  //see Timer "waits" function
+		};
+
+		auto setOnButtonDown = [](lua_State* luaState) {
+			KEngineBasics::InputLibrary* inputLib = (KEngineBasics::InputLibrary*)lua_touserdata(luaState, lua_upvalueindex(1));
+			KEngineBasics::Input* inputSystem = inputLib->GetContextualObject(luaState, 3);
+			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
+			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
+
+			luaL_checktype(luaState, 2, LUA_TFUNCTION);
+
+			ButtonDownBinding* binding = new (lua_newuserdata(luaState, sizeof(ButtonDownBinding))) ButtonDownBinding;
+			luaL_getmetatable(luaState, "KEngineBasics.ButtonDownBinding");
+			lua_setmetatable(luaState, -2);
+
+			KEngineCore::ScheduledLuaCallback<> callback = scheduler->CreateCallback<>(luaState, 2);
+			binding->Init(inputSystem, buttonName, callback.mCallback, callback.mCancelCallback);
+			return 1;
+		};
+
+		auto setOnButtonHold = [](lua_State* luaState) {
+			KEngineBasics::InputLibrary* inputLib = (KEngineBasics::InputLibrary*)lua_touserdata(luaState, lua_upvalueindex(1));
+			KEngineBasics::Input* inputSystem = inputLib->GetContextualObject(luaState, 4);
+			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
+			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
+
+			float frequency = luaL_checknumber(luaState, 2);
+
+			luaL_checktype(luaState, 3, LUA_TFUNCTION);
+
+			ButtonHoldBinding* binding = new (lua_newuserdata(luaState, sizeof(ButtonHoldBinding))) ButtonHoldBinding;
+			luaL_getmetatable(luaState, "KEngineBasics.ButtonHoldBinding");
+			lua_setmetatable(luaState, -2);
+
+			KEngineCore::ScheduledLuaCallback<> callback = scheduler->CreateCallback<>(luaState, 3);
+			binding->Init(inputSystem, inputSystem->mTimer, buttonName, frequency, callback.mCallback, callback.mCancelCallback);
+			return 1;
+		};
+
+		auto setOnButtonUp = [](lua_State* luaState) {
+			KEngineBasics::InputLibrary* inputLib = (KEngineBasics::InputLibrary*)lua_touserdata(luaState, lua_upvalueindex(1));
+			KEngineBasics::Input* inputSystem = inputLib->GetContextualObject(luaState, 3);
+			KEngineCore::LuaScheduler* scheduler = inputSystem->mScheduler;
+			KEngineCore::StringHash buttonName(luaL_checkstring(luaState, 1));
+
+			luaL_checktype(luaState, 2, LUA_TFUNCTION);
+
+			ButtonUpBinding* binding = new (lua_newuserdata(luaState, sizeof(ButtonUpBinding))) ButtonUpBinding;
+			luaL_getmetatable(luaState, "KEngineBasics.ButtonUpBinding");
+			lua_setmetatable(luaState, -2);
+
+			KEngineCore::ScheduledLuaCallback<> callback = scheduler->CreateCallback<>(luaState, 2);
+			binding->Init(inputSystem, buttonName, callback.mCallback, callback.mCancelCallback);
+			return 1;
+		};
+
+		const luaL_Reg inputLibrary[] = {
+			{"setOnCombinedAxisTilt", setOnCombinedAxisTilt},
+			{"waitForButtonDown", waitForButtonDown},
+			{"setOnButtonDown", setOnButtonDown},
+			{"setOnButtonHold", setOnButtonHold},
+			{"setOnButtonUp", setOnButtonUp},
+			{nullptr, nullptr}
+		};
+
+		KEngineCore::CreateGCMetaTableForClass<CombinedAxisBinding, CombinedAxisBinding::MetaName>(luaState);
+		KEngineCore::CreateGCMetaTableForClass<ButtonDownBinding, ButtonDownBinding::MetaName>(luaState);
+		KEngineCore::CreateGCMetaTableForClass<ButtonHoldBinding, ButtonHoldBinding::MetaName>(luaState);
+		KEngineCore::CreateGCMetaTableForClass<ButtonUpBinding, ButtonUpBinding::MetaName>(luaState);
+
+		luaL_newlibtable(luaState, inputLibrary);
+		lua_pushvalue(luaState, lua_upvalueindex(1));
+		luaL_setfuncs(luaState, inputLibrary, 1);
+		return 1;
+	};
+
+	LuaLibraryTwo<Input>::Init(luaState, "input", luaopen_input);
+
+}
+
+void KEngineBasics::InputLibrary::Deinit()
+{
+	LuaLibraryTwo::Deinit();
 }

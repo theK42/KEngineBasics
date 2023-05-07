@@ -24,6 +24,7 @@ namespace KEngineBasics {
 	class ButtonUpBinding;
 	class ButtonHoldBinding;
 	class Input;
+	class InputForwarder;
 
 
 	enum ControllerType {
@@ -207,11 +208,11 @@ namespace KEngineBasics {
 		KEngineCore::Timeout	mTimeout;
 	};
 
-	class Input : private KEngineCore::LuaLibrary
+	class Input
 	{
 	public:
 		Input();
-		virtual ~Input();
+		~Input();
 		void Init(KEngineCore::LuaScheduler* scheduler, KEngineCore::Timer* timer);
 		void Deinit();
 
@@ -235,7 +236,7 @@ namespace KEngineBasics {
 
 		void HandleAxisChange(ControllerType type, int axisId, float axisPosition);
 		void HandleButtonDown(ControllerType type, int buttonId);
-		void HandleButtonUp(ControllerType type, int buttonId);		
+		void HandleButtonUp(ControllerType type, int buttonId);
 
 		bool HasCombinedAxis(KEngineCore::StringHash name) const;
 		bool HasChildAxis(KEngineCore::StringHash parentName, AxisType axisType) const;
@@ -246,7 +247,11 @@ namespace KEngineBasics {
 		KEngineCore::StringHash GetAxisForCombinedAxis(KEngineCore::StringHash combinedAxisName, AxisType axisType) const;
 		KEngineCore::StringHash GetButtonForAxis(KEngineCore::StringHash AxisName, int direction) const;
 
-		virtual void RegisterLibrary(lua_State* luaState, char const* name = "input") override;
+		void AddInputForwarder(InputForwarder* forwarder);
+		void RemoveInputForwarder(InputForwarder* forwarder);
+
+		void Pause();
+		void Resume();
 	private:
 
 		bool HasAxisMapping(ControllerType type, int axisId) const;
@@ -254,6 +259,9 @@ namespace KEngineBasics {
 
 		KEngineCore::StringHash GetAxisMapping(ControllerType type, int axisId) const;
 		KEngineCore::StringHash GetButtonMapping(ControllerType type, int buttonId) const;
+
+		void HandleButonDownInternal(KEngineBasics::ControllerType type, int buttonId);
+		void HandleButtonUpInternal(KEngineBasics::ControllerType type, int buttonId);
 
 		template<typename BindingType>
 		struct BindingGroup
@@ -301,5 +309,57 @@ namespace KEngineBasics {
 		std::map<KEngineCore::StringHash, ButtonBindingPack> mButtonBindings;
 		std::map<KEngineCore::StringHash, BindingGroup<AxisBinding>> mAxisBindings;
 		BindingGroup<CombinedAxisBinding>	mCombinedAxisBindings;
+
+		std::list<InputForwarder*>			mForwarders;
+
+		bool								mPaused { false };
+		
+		struct ControlID
+		{
+			ControllerType	type;
+			int				id;
+
+			bool operator<(const ControlID& r) const {
+				return (type < r.type || (type == r.type && id < r.id));
+			}
+		};
+		
+		std::map<ControlID, int>	mQueuedAxisUpdates;
+		std::set<ControlID>			mQueuedButtonDowns;
+		std::set<ControlID>			mQueuedButtonUps;
+
+		friend class InputLibrary;
 	};
+
+	class InputForwarder
+	{
+	public:
+		InputForwarder();
+		~InputForwarder();
+		void Init(Input* input, std::function<void(ControllerType, int, int)> axisCallback, std::function<void(ControllerType, int)>buttonDownCallback, std::function<void(ControllerType, int)>buttonUpCallback);
+		void Deinit(bool batched = false);
+
+		void HandleAxisChange(ControllerType type, int axisId, float axisPosition);
+		void HandleButtonDown(ControllerType type, int buttonId);
+		void HandleButtonUp(ControllerType type, int buttonId);
+	private:
+		Input* mInput{ nullptr };
+		std::list<InputForwarder*>::iterator	mPosition;
+		std::function<void(double)>				mCallback{ nullptr };
+		friend class Input;
+
+		std::function<void(ControllerType, int, int)>	mAxisCallback;
+		std::function<void(ControllerType, int)>		mButtonDownCallback;
+		std::function<void(ControllerType, int)>		mButtonUpCallback;
+	};
+
+	class InputLibrary : public KEngineCore::LuaLibraryTwo<Input>
+	{
+	public:
+		InputLibrary();
+		~InputLibrary();
+		void Init(lua_State* luaState);
+		void Deinit();
+	};
+
 }
