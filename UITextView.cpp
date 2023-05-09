@@ -21,6 +21,7 @@ void KEngineBasics::UITextView::Init(const KEngineOpenGL::FixWidthBitmapFont& fo
 
 void KEngineBasics::UITextView::Deinit()
 {
+	mText = "";
 	mGraphic.Deinit();
 	mSprite.Deinit();
 	UIView::Deinit();
