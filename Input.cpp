@@ -38,6 +38,13 @@ void Input::Deinit()
 	}
 	mCombinedAxisBindings.mBindings.clear();
 
+	for (auto binding : mVirtualAxisBindings.mBindings)
+	{
+		mVirtualAxisBindings.mProcessingBinding = binding;
+		binding->Deinit();
+	}
+	mVirtualAxisBindings.mBindings.clear();
+
 	for (auto& bindingGroupPair : mAxisBindings)
 	{
 		auto& bindingGroup = bindingGroupPair.second;
@@ -49,6 +56,18 @@ void Input::Deinit()
 		bindingGroup.mProcessingBinding = nullptr;
 	}
 	mAxisBindings.clear();
+
+	for (auto bindingGroupPair : mCursorPositionBindings)
+	{
+		auto& bindingGroup = bindingGroupPair.second;
+		for (auto binding : bindingGroup.mBindings)
+		{
+			bindingGroup.mProcessingBinding = binding;
+			binding->Deinit();
+		}
+		bindingGroup.mProcessingBinding = nullptr;
+	}
+	mCursorPositionBindings.clear();
 
 	for (auto& bindingPackPair : mButtonBindings)
 	{
@@ -72,6 +91,8 @@ void Input::Deinit()
 		}
 		bindingPack.mButtonDownBindings.mProcessingBinding = nullptr;
 	}
+
+
 
 	for (auto forwarder : mForwarders)
 	{
@@ -123,9 +144,24 @@ void Input::AddButton(KEngineCore::StringHash name, ControllerType controllerTyp
 	mButtonBindings[name] = {};
 }
 
+void KEngineBasics::Input::AddCursor(KEngineCore::StringHash name, ControllerType controllerType)
+{
+	mCursors.insert(name);
+	mCursorMappings[controllerType] = name;
+	mCursorPositionBindings[name] = {};
+}
+
+void KEngineBasics::Input::AddVirtualAxis(KEngineCore::StringHash axisName, KEngineCore::StringHash convertedCursorName, AxisType axisType, KEngineCore::StringHash buttonName, float conversionFactor)
+{
+	assert(HasCursor(convertedCursorName));
+	assert(HasButton(buttonName));
+	mVirtualAxes[axisName] = { convertedCursorName, buttonName, axisType, conversionFactor };
+}
+
 
 void Input::AddCombinedAxisBinding(CombinedAxisBinding* binding)
 {
+	assert(HasCombinedAxis(binding->GetControlName()));
 	mCombinedAxisBindings.mBindings.push_back(binding);
 	binding->SetPosition(std::next(mCombinedAxisBindings.mBindings.rbegin()).base());
 }
@@ -136,6 +172,13 @@ void Input::AddAxisBinding(AxisBinding* binding)
 	auto& bindingGroup = GetAxisBindings(binding->GetAxisName());
 	bindingGroup.mBindings.push_back(binding);
 	binding->SetPosition(std::next(bindingGroup.mBindings.rbegin()).base());
+}
+
+void KEngineBasics::Input::AddVirtualAxisBinding(VirtualAxisBinding* binding)
+{
+	assert(HasVirtualAxis(binding->GetControlName()));
+	mVirtualAxisBindings.mBindings.push_back(binding);
+	binding->SetPosition(std::next(mVirtualAxisBindings.mBindings.rbegin()).base());
 }
 
 void Input::AddButtonDownBinding(ButtonDownBinding* binding)
@@ -154,10 +197,19 @@ void Input::AddButtonUpBinding(ButtonUpBinding* binding)
 	binding->SetPosition(std::next(bindingGroup.mBindings.rbegin()).base());
 }
 
+
 void Input::AddButtonHoldBinding(ButtonHoldBinding* binding)
 {
 	assert(HasButton(binding->GetButtonName()));
 	auto& bindingGroup = GetButtonBindings(binding->GetButtonName()).mButtonHoldBindings;
+	bindingGroup.mBindings.push_back(binding);
+	binding->SetPosition(std::next(bindingGroup.mBindings.rbegin()).base());
+}
+
+void KEngineBasics::Input::AddCursorPositionBinding(CursorPositionBinding* binding)
+{
+	assert(HasCursor(binding->GetControlName()));
+	auto& bindingGroup = mCursorPositionBindings[binding->GetControlName()];
 	bindingGroup.mBindings.push_back(binding);
 	binding->SetPosition(std::next(bindingGroup.mBindings.rbegin()).base());
 }
@@ -198,6 +250,23 @@ bool Input::RemoveAxisBinding(AxisBinding* binding)
 	return false;
 }
 
+bool KEngineBasics::Input::RemoveVirtualAxisBinding(VirtualAxisBinding* binding)
+{
+	if (mVirtualAxisBindings.mBindings.end() != binding->GetPosition())
+	{
+		if (mVirtualAxisBindings.mProcessingBinding == binding)
+		{
+			mVirtualAxisBindings.mSelfClearedBindings.push_back(binding);
+		}
+		else
+		{
+			mVirtualAxisBindings.mBindings.erase(binding->GetPosition());
+		}
+		return true;
+	}
+	return false;
+}
+
 bool Input::RemoveButtonDownBinding(ButtonDownBinding* binding)
 {
 	assert(HasButton(binding->GetButtonName()));
@@ -221,6 +290,25 @@ bool Input::RemoveButtonHoldBinding(ButtonHoldBinding* binding)
 {
 	assert(HasButton(binding->GetButtonName()));
 	auto& bindingGroup = GetButtonBindings(binding->GetButtonName()).mButtonHoldBindings;
+	if (bindingGroup.mBindings.end() != binding->GetPosition())
+	{
+		if (bindingGroup.mProcessingBinding == binding)
+		{
+			bindingGroup.mSelfClearedBindings.push_back(binding);
+		}
+		else
+		{
+			bindingGroup.mBindings.erase(binding->GetPosition());
+		}
+		return true;
+	}
+	return false;
+}
+
+bool KEngineBasics::Input::RemoveCursorPositionBinding(CursorPositionBinding* binding)
+{
+	assert(HasCursor(binding->GetControlName()));
+	auto& bindingGroup = mCursorPositionBindings[binding->GetControlName()];
 	if (bindingGroup.mBindings.end() != binding->GetPosition())
 	{
 		if (bindingGroup.mProcessingBinding == binding)
@@ -495,7 +583,6 @@ void AxisBinding::Init(Input* inputSystem, KEngineCore::Timer* timer, KEngineCor
 	mDead = true;
 	mLastTilt = 0.0f;
 
-
 	if (inputSystem->HasAxisButton(controlName, -1)) {
 		KEngineCore::StringHash negativeButton = inputSystem->GetButtonForAxis(controlName, -1);
 		mNegativeDown.Init(inputSystem, negativeButton, [this]()
@@ -526,6 +613,11 @@ void AxisBinding::Init(Input* inputSystem, KEngineCore::Timer* timer, KEngineCor
 		);
 	}
 
+	if (inputSystem->HasVirtualAxis(controlName)) {
+		mVirtualAxisChanged.Init(inputSystem, controlName, [this](float position) {
+			UpdateAxis(position);
+		});
+	}
 }
 
 void AxisBinding::Deinit()
@@ -587,6 +679,163 @@ void AxisBinding::Cancel()
 		mInputSystem = nullptr;
 	}
 }
+
+KEngineBasics::CursorPositionBinding::CursorPositionBinding()
+{
+}
+
+KEngineBasics::CursorPositionBinding::~CursorPositionBinding()
+{
+	Deinit();
+}
+
+void KEngineBasics::CursorPositionBinding::Init(Input* inputSystem, KEngineCore::StringHash controlName, std::function<void(const KEngine2D::Point&)> callback, std::function<void()> cancelCallback)
+{
+	assert(mInputSystem == nullptr);
+	assert(inputSystem->HasCursor(controlName));
+	mInputSystem = inputSystem;
+	mControlName = controlName;
+	mCallback = callback;
+	mCancelCallback = cancelCallback;
+	inputSystem->AddCursorPositionBinding(this);
+}
+
+void KEngineBasics::CursorPositionBinding::Deinit()
+{
+	Cancel();
+}
+
+void KEngineBasics::CursorPositionBinding::SetPosition(Position position)
+{
+	mPosition = position;
+}
+
+KEngineBasics::CursorPositionBinding::Position KEngineBasics::CursorPositionBinding::GetPosition()
+{
+	return mPosition;
+}
+
+KEngineCore::StringHash KEngineBasics::CursorPositionBinding::GetControlName() const
+{
+	return mControlName;
+}
+
+void KEngineBasics::CursorPositionBinding::UpdateCursor(const KEngine2D::Point& point)
+{
+	Fire(point);
+}
+
+void KEngineBasics::CursorPositionBinding::Fire(const KEngine2D::Point& point)
+{
+	if (mCallback)
+	{
+		mCallback(point);
+	}
+}
+
+void KEngineBasics::CursorPositionBinding::Cancel()
+{
+	if (mInputSystem)
+	{
+		if (mCancelCallback)
+		{
+			mCancelCallback();
+		}
+		mInputSystem->RemoveCursorPositionBinding(this);
+	}
+	mInputSystem = nullptr;
+}
+
+
+KEngineBasics::VirtualAxisBinding::VirtualAxisBinding()
+{
+}
+
+KEngineBasics::VirtualAxisBinding::~VirtualAxisBinding()
+{
+	Deinit();
+}
+
+void KEngineBasics::VirtualAxisBinding::Init(Input* inputSystem, KEngineCore::StringHash controlName, std::function<void(float)> callback, std::function<void()> cancelCallback)
+{
+	assert(mInputSystem == nullptr);
+	assert(inputSystem->HasVirtualAxis(controlName));
+	mInputSystem = inputSystem;
+	mControlName = controlName;
+	mCallback = callback;
+	mCancelCallback = cancelCallback;
+	inputSystem->AddVirtualAxisBinding(this);
+	mDescription = inputSystem->GetVirtualAxisDescription(controlName);
+	assert(inputSystem->HasCursor(mDescription.mConvertedCursor));
+	assert(inputSystem->HasButton(mDescription.mConvertingButton));
+
+	mCursorPositionChanged.Init(inputSystem, mDescription.mConvertedCursor, [this](const KEngine2D::Point& position) {
+		switch (mDescription.mAxisType)
+		{
+		case AxisType::Horizontal:
+			mCurrentPosition = position.x;
+			break;
+		case AxisType::Vertical:
+			mCurrentPosition = position.y;
+			break;
+		}
+		if (mActive)
+		{
+			float diff = mCurrentPosition - mStartPosition;
+			float converted = std::clamp(diff * mDescription.mConversionRate, -1.0f, 1.0f);
+			mCallback(converted);
+		}
+	});
+
+	mConvertingDown.Init(inputSystem, mDescription.mConvertingButton, [this]() {
+		mStartPosition = mCurrentPosition;
+		mActive = true;
+	});
+
+	mConvertingUp.Init(inputSystem, mDescription.mConvertingButton, [this]() {
+		mCallback(0.0);
+		mActive = false;
+	});
+}
+
+void KEngineBasics::VirtualAxisBinding::Deinit()
+{
+	Cancel();
+}
+
+void KEngineBasics::VirtualAxisBinding::SetPosition(Position position)
+{
+	mPosition = position;
+}
+
+KEngineBasics::VirtualAxisBinding::Position KEngineBasics::VirtualAxisBinding::GetPosition()
+{
+	return mPosition;
+}
+
+KEngineCore::StringHash KEngineBasics::VirtualAxisBinding::GetControlName() const
+{
+	return mControlName;
+}
+
+void KEngineBasics::VirtualAxisBinding::Fire(float tilt)
+{
+	mCallback(tilt);
+}
+
+void KEngineBasics::VirtualAxisBinding::Cancel()
+{
+	if (mInputSystem)
+	{
+		if (mCancelCallback)
+		{
+			mCancelCallback();
+		}
+		mInputSystem->RemoveVirtualAxisBinding(this);
+	}
+	mInputSystem = nullptr;
+}
+
 
 KEngineBasics::CombinedAxisBinding::CombinedAxisBinding()
 {
@@ -793,12 +1042,40 @@ void KEngineBasics::Input::HandleButtonUp(ControllerType type, int buttonId)
 	}
 }
 
+void KEngineBasics::Input::HandleCursorPosition(ControllerType type, const KEngine2D::Point& position)
+{
+	if (mPaused)
+	{
+		mQueuedCursorUpdates[type] = position;
+	}
+	else
+	{
+		if (HasCursorMapping(type))
+		{
+			KEngineCore::StringHash cursorName = GetCursorMapping(type);
+			auto& bindingGroup = GetCursorBindings(cursorName);
+			for (CursorPositionBinding* binding : bindingGroup.mBindings)
+			{
+				bindingGroup.mProcessingBinding = binding;
+				binding->UpdateCursor(position);
+			}
+			bindingGroup.mProcessingBinding = nullptr;
+			bindingGroup.Cleanup();
+		}
+
+		for (auto forwarder : mForwarders)
+		{
+			forwarder->HandleCursorPosition(type, position);
+		}
+	}
+}
+
 void KEngineBasics::Input::HandleButtonUpInternal(KEngineBasics::ControllerType type, int buttonId)
 {
 	if (HasButtonMapping(type, buttonId))
 	{
-		KEngineCore::StringHash axisName = GetButtonMapping(type, buttonId);
-		auto& bindingGroup = GetButtonBindings(axisName).mButtonUpBindings;
+		KEngineCore::StringHash buttonName = GetButtonMapping(type, buttonId); 
+		auto& bindingGroup = GetButtonBindings(buttonName).mButtonUpBindings;
 		for (ButtonUpBinding* binding : bindingGroup.mBindings)
 		{
 			bindingGroup.mProcessingBinding = binding;
@@ -825,6 +1102,16 @@ bool KEngineBasics::Input::HasAxis(KEngineCore::StringHash name) const
 	return mAxes.find(name) != mAxes.end();
 }
 
+bool KEngineBasics::Input::HasCursor(KEngineCore::StringHash name) const
+{
+	return mCursors.contains(name);
+}
+
+bool KEngineBasics::Input::HasVirtualAxis(KEngineCore::StringHash name) const
+{
+	return mVirtualAxes.contains(name);
+}
+
 bool KEngineBasics::Input::HasAxisButton(KEngineCore::StringHash parentName, int direction) const
 {
 	return mAxisButtons.find({ parentName, direction }) != mAxisButtons.end();
@@ -843,6 +1130,11 @@ KEngineCore::StringHash KEngineBasics::Input::GetAxisForCombinedAxis(KEngineCore
 KEngineCore::StringHash KEngineBasics::Input::GetButtonForAxis(KEngineCore::StringHash axisName, int direction) const
 {
 	return mAxisButtons.find({ axisName, direction })->second;
+}
+
+const VirtualAxisDescription& KEngineBasics::Input::GetVirtualAxisDescription(KEngineCore::StringHash virtualAxisName) const
+{
+	return mVirtualAxes.find(virtualAxisName)->second;
 }
 
 void KEngineBasics::Input::AddInputForwarder(InputForwarder* forwarder)
@@ -880,6 +1172,11 @@ void KEngineBasics::Input::Resume()
 		HandleButtonUp(entry.type, entry.id);
 	}
 	mQueuedButtonUps.clear();
+	for (auto entry : mQueuedCursorUpdates)
+	{
+		HandleCursorPosition(entry.first, entry.second);
+	}
+	mQueuedCursorUpdates.clear();
 }
 
 bool KEngineBasics::Input::HasAxisMapping(ControllerType type, int axisId) const
@@ -892,6 +1189,11 @@ bool KEngineBasics::Input::HasButtonMapping(ControllerType type, int axisId) con
 	return mButtonMappings.find({ type, axisId }) != mButtonMappings.end();
 }
 
+bool KEngineBasics::Input::HasCursorMapping(ControllerType type) const
+{
+	return mCursorMappings.find({ type }) != mCursorMappings.end();
+}
+
 KEngineCore::StringHash KEngineBasics::Input::GetAxisMapping(ControllerType type, int axisId) const 
 {
 	return mAxisMappings.find({ type, axisId })->second;
@@ -900,6 +1202,11 @@ KEngineCore::StringHash KEngineBasics::Input::GetAxisMapping(ControllerType type
 KEngineCore::StringHash KEngineBasics::Input::GetButtonMapping(ControllerType type, int buttonId) const
 {
 	return mButtonMappings.find({ type, buttonId })->second;
+}
+
+KEngineCore::StringHash KEngineBasics::Input::GetCursorMapping(ControllerType type) const
+{
+	return mCursorMappings.find(type)->second;
 }
 
 KEngineBasics::Input::BindingGroup<AxisBinding>& KEngineBasics::Input::GetAxisBindings(KEngineCore::StringHash name)
@@ -912,6 +1219,11 @@ KEngineBasics::Input::ButtonBindingPack& KEngineBasics::Input::GetButtonBindings
 	return mButtonBindings.find(name)->second;
 }
 
+KEngineBasics::Input::BindingGroup<CursorPositionBinding>& KEngineBasics::Input::GetCursorBindings(KEngineCore::StringHash name)
+{
+	return mCursorPositionBindings.find(name)->second;
+}
+
 KEngineBasics::InputForwarder::InputForwarder()
 {
 }
@@ -921,12 +1233,13 @@ KEngineBasics::InputForwarder::~InputForwarder()
 	Deinit();
 }
 
-void KEngineBasics::InputForwarder::Init(Input* input, std::function<void(ControllerType, int, int)> axisCallback, std::function<void(ControllerType, int)> buttonDownCallback, std::function<void(ControllerType, int)> buttonUpCallback)
+void KEngineBasics::InputForwarder::Init(Input* input, std::function<void(ControllerType, int, int)> axisCallback, std::function<void(ControllerType, int)> buttonDownCallback, std::function<void(ControllerType, int)> buttonUpCallback, std::function<void(ControllerType, const KEngine2D::Point&)> cursorPositionCallback)
 {
 	assert(mInput == nullptr);
 	mAxisCallback = axisCallback;
 	mButtonDownCallback = buttonDownCallback;
 	mButtonUpCallback = buttonUpCallback;
+	mCursorPositionCallback = cursorPositionCallback;
 	mInput = input;
 	input->AddInputForwarder(this);
 }
@@ -941,6 +1254,7 @@ void KEngineBasics::InputForwarder::Deinit(bool batched)
 	mAxisCallback = nullptr;
 	mButtonDownCallback = nullptr;
 	mButtonUpCallback = nullptr;
+	mCursorPositionCallback = nullptr;
 }
 
 void KEngineBasics::InputForwarder::HandleAxisChange(ControllerType type, int axisId, float axisPosition)
@@ -956,6 +1270,11 @@ void KEngineBasics::InputForwarder::HandleButtonDown(ControllerType type, int bu
 void KEngineBasics::InputForwarder::HandleButtonUp(ControllerType type, int buttonId)
 {
 	mButtonUpCallback(type, buttonId);
+}
+
+void KEngineBasics::InputForwarder::HandleCursorPosition(ControllerType type, const KEngine2D::Point& position)
+{
+	mCursorPositionCallback(type, position);
 }
 
 KEngineBasics::InputLibrary::InputLibrary()
@@ -1095,3 +1414,4 @@ void KEngineBasics::InputLibrary::Deinit()
 {
 	LuaLibraryTwo::Deinit();
 }
+
