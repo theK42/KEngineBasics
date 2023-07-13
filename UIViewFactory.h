@@ -15,7 +15,7 @@ namespace KEngineBasics {
 	public:
 		UIViewFactory();
 		~UIViewFactory();
-		void Init(ShaderFactory* shaderFactory, FontFactory* fontFactory, SpriteRenderer* renderer, TextRenderer* textRenderer, KEngine2D::HierarchyUpdater* hierarchySystem, int uiLayer);
+        void Init(KEngineGraphics::ShaderFactory* shaderFactory, KEngineGraphics::FontFactory* fontFactory, KEngineGraphics::SpriteRenderer* renderer, KEngineGraphics::TextRenderer* textRenderer, KEngine2D::HierarchyUpdater* hierarchySystem, int uiLayer);
 		void Deinit();
 
 		KEngineCore::DisposableGroup* CreateUIGroup();
@@ -35,16 +35,16 @@ namespace KEngineBasics {
 
 	private:
 			
-		ShaderFactory*	mShaderFactory{ nullptr };
-		FontFactory*	mFontFactory{ nullptr };
+        KEngineGraphics::ShaderFactory*	mShaderFactory{ nullptr };
+        KEngineGraphics::FontFactory*	mFontFactory{ nullptr };
 
-		SpriteRenderer*					mRenderer{ nullptr };
-		TextRenderer*					mTextRenderer{ nullptr };
+        KEngineGraphics::SpriteRenderer*					mRenderer{ nullptr };
+        KEngineGraphics::TextRenderer*					mTextRenderer{ nullptr };
 		KEngine2D::HierarchyUpdater*	mHierarchySystem{ nullptr };
 
-		KEngineCore::RecyclingPool<Sprite>			mSpritePool;
-		KEngineCore::RecyclingPool<TextSprite>		mTextPool;
-		KEngineCore::RecyclingPool<SpriteGraphic>	mGraphicPool;
+		KEngineCore::RecyclingPool<KEngineGraphics::Sprite>			mSpritePool;
+		KEngineCore::RecyclingPool<KEngineGraphics::TextSprite>		mTextPool;
+		KEngineCore::RecyclingPool<KEngineGraphics::SpriteGraphic>	mGraphicPool;
 
 		KEngineCore::RecyclingPool<KEngine2D::StaticTransform>					mStaticTransformPool;
 		KEngineCore::RecyclingPool<KEngine2D::UpdatingHierarchicalTransform>	mHierarchicalTransformPool;

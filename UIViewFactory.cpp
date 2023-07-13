@@ -9,7 +9,7 @@ KEngineBasics::UIViewFactory::~UIViewFactory()
 	Deinit();
 }
 
-void KEngineBasics::UIViewFactory::Init(ShaderFactory* shaderFactory, FontFactory* fontFactory, SpriteRenderer* renderer, TextRenderer* textRenderer, KEngine2D::HierarchyUpdater* hierarchySystem, int uiLayer)
+void KEngineBasics::UIViewFactory::Init(KEngineGraphics::ShaderFactory* shaderFactory, KEngineGraphics::FontFactory* fontFactory, KEngineGraphics::SpriteRenderer* renderer, KEngineGraphics::TextRenderer* textRenderer, KEngine2D::HierarchyUpdater* hierarchySystem, int uiLayer)
 {
 	assert(mRenderer == nullptr);
 	mShaderFactory = shaderFactory;
