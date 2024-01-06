@@ -8,6 +8,7 @@
 #include <map>
 #include <vector>
 #include <list>
+#include <compare>
 
 
 namespace KEngineCore
