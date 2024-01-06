@@ -13,6 +13,7 @@
 namespace KEngineCore
 {
 	class LuaScheduler;
+    class Logger;
 }
 
 namespace KEngineBasics {
@@ -36,7 +37,7 @@ namespace KEngineBasics {
 		AudioSystem();
 		~AudioSystem();
 
-		void Init(KEngineCore::LuaScheduler* luaScheduler);
+		void Init(KEngineCore::LuaScheduler* luaScheduler, KEngineCore::Logger* logger);
 		void Deinit();
 
 		void RegisterLibrary(lua_State* luaState, char const* name = "audio");
@@ -56,6 +57,7 @@ namespace KEngineBasics {
 		void RecycleSound(Sound* sound);
 	private:
 		KEngineCore::LuaScheduler*	mLuaScheduler;
+        KEngineCore::Logger*        mLogger;
 		KEngineCore::Pool<Sound>	mSoundPool;
 
 		std::map<KEngineCore::StringHash, Mix_Music*> mLoadedMusic;

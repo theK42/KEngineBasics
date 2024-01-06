@@ -1,5 +1,6 @@
 #include "Audio.h"
 #include "LuaScheduler.h"
+#include "Logger.h"
 
 KEngineBasics::AudioSystem::AudioSystem()
 {
@@ -10,13 +11,15 @@ KEngineBasics::AudioSystem::~AudioSystem()
 	Deinit();
 }
 
-void KEngineBasics::AudioSystem::Init(KEngineCore::LuaScheduler* luaScheduler)
+void KEngineBasics::AudioSystem::Init(KEngineCore::LuaScheduler* luaScheduler, KEngineCore::Logger * logger)
 {
+    assert(mLuaScheduler == nullptr);
+    mLogger = logger;
 	int status = Mix_Init(MIX_INIT_MP3);
     if ((status & MIX_INIT_MP3) == 0)
     {
-        fprintf(stderr, "Failed to get MP3 support\n");
-        fprintf(stderr, "Mix_Init error: %s\n", Mix_GetError());
+        mLogger->LogError("Failed to get MP3 support");
+        mLogger->LogError("Mix_Init error: {}", Mix_GetError());
     }
     status = Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, MIX_DEFAULT_CHANNELS, 2048);
     assert(status == 0);
@@ -85,8 +88,8 @@ void KEngineBasics::AudioSystem::LoadMusic(KEngineCore::StringHash musicId, cons
 	Mix_Music* m = Mix_LoadMUS(filename.c_str());
     if (!m)
     {
-        fprintf(stderr, "Music file failed to load: %s\n", filename.c_str());
-        fprintf(stderr, "Mix_LoadMUS error: %s\n", Mix_GetError());
+        mLogger->LogError("Music file failed to load: {}", filename.c_str());
+        mLogger->LogError("Mix_LoadMUS error: {}", Mix_GetError());
     } else {
         mLoadedMusic[musicId] = m;
     }
@@ -142,7 +145,7 @@ KEngineBasics::Sound* KEngineBasics::AudioSystem::PlaySound(KEngineCore::StringH
 		int channel = Mix_PlayChannel(-1, s, 0);
         if (channel == -1)
         {
-            fprintf(stderr, "Mix_PlayChannel error: %s\n", Mix_GetError());
+            mLogger->LogError("Mix_PlayChannel error: {}\n", Mix_GetError());
         }
 	}
 	return nullptr;

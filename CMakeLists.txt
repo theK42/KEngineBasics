@@ -1,22 +1,45 @@
 cmake_minimum_required(VERSION 3.10)
 
 #set the project name
-project(KEngine)
 
-add_library(KEngineBasics STATIC
-Input.h
-Input.cpp
-Audio.h
-Audio.cpp
-UIView.h
-UIView.cpp
-UITextView.h
-UITextView.cpp
-Renderers.h
-Renderers.cpp
-UIViewFactory.h
-UIViewFactory.cpp
+project(KEngineBasics)
+
+set(KEngineBasicsSourceFiles)
+list(APPEND KEngineBasicsSourceFiles
+    Input.h
+    Input.cpp
+    Audio.h
+    Audio.cpp
+    UIView.h
+    UIView.cpp
+    UITextView.h
+    UITextView.cpp
+    Renderers.h
+    Renderers.cpp
+    UIViewFactory.h
+    UIViewFactory.cpp
 )
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "Android")
+    list(APPEND KEngineBasicsSourceFiles
+		AndroidLogger.h
+		AndroidLogger.cpp
+    )
+else()
+    list(APPEND KEngineBasicsSourceFiles
+        StdLogger.h
+        StdLogger.cpp
+    )
+endif()
+
+add_library(KEngineBasics STATIC ${KEngineBasicsSourceFiles})
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "Android")
+    find_library( log-lib log )
+    target_link_libraries(KEngineBasics PRIVATE ${log-lib})
+endif()
+    
+
 
 function(add_submodule submodule)
     message("adding submodule ${submodule}")
